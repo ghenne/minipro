@@ -35,7 +35,7 @@ void print_help_and_exit(char *progname) {
 		"	-l		List all supported devices\n"
 		"	-r <filename>	Read memory\n"
 		"	-w <filename>	Write memory\n"
-		"       -b              Blank Check\n"
+		"	-b              Blank Check\n"
 		"	-e 		Do NOT erase device\n"
 		"	-u 		Do NOT disable write-protect\n"
 		"	-P 		Do NOT enable write-protect\n"
@@ -71,7 +71,7 @@ void parse_cmdline(int argc, char **argv) {
 	int8_t c;
 	memset(&cmdopts, 0, sizeof(cmdopts));
 
-	while((c = getopt(argc, argv, "leuPvyr:w:p:c:iIb")) != -1) {
+	while((c = getopt(argc, argv, "lbeuPvyr:w:p:c:iI")) != -1) {
 		switch(c) {
 			case 'l':
 				print_devices_and_exit();
@@ -511,7 +511,7 @@ int action_blankcheck(const char *filename, minipro_handle_t *handle, device_t *
 
 int main(int argc, char **argv) {
 	parse_cmdline(argc, argv);
-	if(!cmdopts.filename) {
+	if(!cmdopts.filename && cmdopts.action != action_blankcheck){
 		print_help_and_exit(argv[0]);
 	}
 	if(cmdopts.action && !cmdopts.device) {
