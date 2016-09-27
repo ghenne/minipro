@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <libgen.h>
 #include <signal.h>
+#include <stdbool.h>
 #include "main.h"
 #include "minipro.h"
 #include "database.h"
@@ -14,7 +15,7 @@
 #include "error.h"
 
 struct {
-	void (*action) (const char *, minipro_handle_t *handle, device_t *device);
+	int (*action) (const char *, minipro_handle_t *handle, device_t *device);
 	char *filename;
 	device_t *device;
 	enum { UNSPECIFIED = 0, CODE, DATA, CONFIG } page;
@@ -34,6 +35,7 @@ void print_help_and_exit(char *progname) {
 		"	-l		List all supported devices\n"
 		"	-r <filename>	Read memory\n"
 		"	-w <filename>	Write memory\n"
+		"       -b              Blank Check\n"
 		"	-e 		Do NOT erase device\n"
 		"	-u 		Do NOT disable write-protect\n"
 		"	-P 		Do NOT enable write-protect\n"
@@ -69,7 +71,7 @@ void parse_cmdline(int argc, char **argv) {
 	int8_t c;
 	memset(&cmdopts, 0, sizeof(cmdopts));
 
-	while((c = getopt(argc, argv, "leuPvyr:w:p:c:iI")) != -1) {
+	while((c = getopt(argc, argv, "leuPvyr:w:p:c:iIb")) != -1) {
 		switch(c) {
 			case 'l':
 				print_devices_and_exit();
@@ -118,6 +120,10 @@ void parse_cmdline(int argc, char **argv) {
 			case 'w':
 				cmdopts.action = action_write;
 				cmdopts.filename = optarg;
+				break;
+			case 'b':
+				cmdopts.action = action_blankcheck;
+				//cmdopts.filename = optarg;
 				break;
 
 		        case 'i':
@@ -374,7 +380,7 @@ void verify_page_file(minipro_handle_t *handle, const char *filename, unsigned i
 }
 
 /* Higher-level logic */
-void action_read(const char *filename, minipro_handle_t *handle, device_t *device) {
+int action_read(const char *filename, minipro_handle_t *handle, device_t *device) {
 	char *code_filename = (char*) filename;
 	char *data_filename = (char*) filename;
 	char *config_filename = (char*) filename;
@@ -400,10 +406,11 @@ void action_read(const char *filename, minipro_handle_t *handle, device_t *devic
 			}
 			break;
 	}
-	minipro_end_transaction(handle); 
+	minipro_end_transaction(handle);
+	return 0;
 }
 
-void action_write(const char *filename, minipro_handle_t *handle, device_t *device) {
+int action_write(const char *filename, minipro_handle_t *handle, device_t *device) {
 	switch(cmdopts.page) {
 		case UNSPECIFIED:
 		case CODE:
@@ -457,6 +464,49 @@ void action_write(const char *filename, minipro_handle_t *handle, device_t *devi
 		minipro_protect_on(handle);
 		minipro_end_transaction(handle);
 	}
+	return 0;
+}
+
+int action_blankcheck(const char *filename, minipro_handle_t *handle, device_t *device) {
+	minipro_begin_transaction(handle); // Prevent device from hanging
+	int size = 0;
+	unsigned int type;
+	const char *name;
+	switch(cmdopts.page) {
+		case UNSPECIFIED:
+		case CODE:
+		        type = MP_READ_CODE;
+		        name = "Code";
+		        size = device->code_memory_size;
+			break;
+		case DATA:
+		        type = MP_READ_DATA;
+		        name = "Data";
+		        size = device->data_memory_size;
+			break;
+		case CONFIG:
+			break;
+	}
+        unsigned char *buf = malloc(device->code_memory_size);
+        if(!buf) {
+                ERROR("Can't malloc");
+        }
+        read_page_ram(handle, buf, type, name, size);
+        bool isBlank = true;
+        unsigned int idx;
+        for(idx=0; idx < size; idx++)
+        {
+                if(buf[idx] != 0xff)
+                {
+                        printf("Blank check failed at address %05x with value %d\n", idx, (int)buf[idx]);
+                        isBlank = false;
+                        break;
+                }
+        }
+	minipro_end_transaction(handle);
+	if(isBlank)
+	        return 0;
+	return 1; 
 }
 
 int main(int argc, char **argv) {
@@ -532,9 +582,9 @@ int main(int argc, char **argv) {
 			break;
 	}
 
-	cmdopts.action(cmdopts.filename, handle, device);
+	int retval = cmdopts.action(cmdopts.filename, handle, device);
 
 	minipro_close(handle);
 
-	return(0);
+	return(retval);
 }
